@@ -187,7 +187,7 @@ const LS='cogscreen-all-records';
 function lsAll(){try{return JSON.parse(localStorage.getItem(LS)||'[]')}catch(e){return[]}}
 function lsSave(l){try{localStorage.setItem(LS,JSON.stringify(l.slice(-300)))}catch(e){}}
 async function saveRecord(rec){rec.id='l'+Date.now();const l=lsAll();l.push(rec);lsSave(l);
-  if(SHEET_URL){try{const r=await fetch(SHEET_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify(rec)});if(r.ok)return {where:'shared'}}catch(e){}return {where:'failed'}}return {where:'local'}}
+  if(SHEET_URL){let why='';try{const r=await fetch(SHEET_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify(rec)});const t=await r.text();let j=null;try{j=JSON.parse(t)}catch(_){}if(j&&j.ok)return {where:'shared'};why=j&&j.error?j.error:('HTTP '+r.status+' '+t.slice(0,80))}catch(e){why=String(e)}return {where:'failed',why}}return {where:'local'}}
 async function loadRecords(){if(SHEET_URL){try{const r=await fetch(SHEET_URL+'?t='+Date.now());const j=await r.json();if(Array.isArray(j))return {where:'shared',list:j.sort((a,b)=>(b.ts||0)-(a.ts||0))}}catch(e){}return {where:'failed',list:lsAll().slice().reverse()}}return {where:'local',list:lsAll().slice().reverse()}}
 
 // ===== 共用題型 =====
@@ -310,7 +310,7 @@ function result(){Audio.big();sparkle(14);
   if(state.timeouts>=(V.key==='std'?3:2))advice+='　本次有多題逾時，可能受聽力、視力或專注狀況影響，解讀時請一併考量。';
   const prob=probImpair(V,adj,recall),d=new Date(),stamp=`${d.getFullYear()}/${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
   const rec={v:V.key,vname:V.name,name:state.name,age:state.age,edu:state.edu,score:adj,raw,total:V.total,band,cls,prob:Math.round(prob*1000)/1000,mins,timeouts:state.timeouts,sections:sections.map(s=>({name:s.name,got:s.got,max:s.max,note:s.note})),ts:Date.now(),stamp};
-  saveRecord(rec).then(r=>{const el=$('#saved');if(el)el.textContent=r.where==='shared'?'已存入共用試算表':r.where==='failed'?'試算表連線失敗，已暫存在這台裝置，請用「複製結果」另外保留':'已存在這台裝置'});
+  saveRecord(rec).then(r=>{const el=$('#saved');if(el)el.textContent=r.where==='shared'?'已存入共用試算表':r.where==='failed'?'試算表寫入失敗（'+(r.why||'')+'），已暫存在這台裝置，請用「複製結果」另外保留':'已存在這台裝置'});
   state=null;
   showIntro(`<header><h1>${esc(rec.name)} 回家了<span>.</span><span class="tag">${V.name}</span></h1></header>
   <div class="panel"><div class="score">${adj} <span style="font-size:26px;color:var(--muted)">/ ${V.total}</span></div><div class="band ${cls}">${band}</div>${gaugeHtml(prob)}<p class="lede">${esc(advice)}</p></div>
