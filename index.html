@@ -1,5 +1,5 @@
 <!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#0d1726">
-<title>螢火蟲夜遊｜腦力快篩</title>
+<title>螢火蟲夜遊｜腦健康遊戲</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap">
 <style>
 /* Night garden: one fixed full-screen stage, ambient fireflies on canvas, task panel floating over it, glow accent for everything that rewards. */
@@ -180,7 +180,7 @@ const sections=[];
 function addScore(name,got,max,note){sections.push({name,got:Math.max(0,Math.min(max,got)),max,note:note||''})}
 function probImpair(v,s,recall){const logit=-v.k*(s-v.mid)+(recall<4?1.0:0);return 1/(1+Math.exp(-logit))}
 function probLevel(p){return p<.1?'很低':p<.25?'偏低':p<.5?'中等':p<.75?'偏高':'很高'}
-function gaugeHtml(p){const pct=Math.round(p*100);return `<div class="gauge"><div class="pct">${pct}%<small>認知障礙可能性（估計）：${probLevel(p)}</small></div><div class="track"><span class="mark" style="left:${pct}%"></span></div><div class="lab"><span>0%</span><span>50%</span><span>100%</span></div></div>`}
+function gaugeHtml(p){const pct=Math.round(p*100);return `<div class="gauge"><div class="pct">${pct}%<small>需要進一步腦健康評估的可能性（估計）：${probLevel(p)}</small></div><div class="track"><span class="mark" style="left:${pct}%"></span></div><div class="lab"><span>0%</span><span>50%</span><span>100%</span></div></div>`}
 
 // ===== 記錄：Google 試算表，失敗時存本機 =====
 const LS='cogscreen-all-records';
@@ -291,7 +291,7 @@ function home(){setV(null);state=null;Audio.stop();
   showIntro(`<header style="display:flex;flex-direction:column;gap:8px"><h1>螢火蟲夜遊<span>.</span></h1><p class="lede">跟著螢火蟲走一趟夜間花園：記住寶物、看星空、抓螢火蟲、點亮燈籠，最後把寶物帶回家。全程只要用手指點按。</p><p class="note">篩檢用途，不應作為診斷依據，詳情請洽專業人員</p></header>
   <div class="panel"><h3>選一個版本</h3><div class="grid" style="grid-template-columns:1fr" id="vs">${Object.values(VERSIONS).map(v=>`<button type="button" class="btn vcard" data-v="${v.key}"><b>${v.name}<span class="tag">${v.mins}</span></b><span>適合：${v.who}</span><span>${v.desc}</span></button>`).join('')}</div></div>
   <div class="row">${btn('查看所有受試者記錄','quiet','recs')}</div>
-  <div class="warnbox"><b>這是篩檢遊戲：</b>分數與「認知障礙可能性」是依門檻推估的參考值，尚未以臨床樣本校正，不是診斷。建議由家人或工作人員陪同進行。</div>`,'螢火蟲夜遊。請選擇版本。');
+  <div class="warnbox"><b>這是篩檢遊戲：</b>分數與「需要進一步評估的可能性」是依門檻推估的參考值，尚未以臨床樣本校正，不是診斷。建議由家人或工作人員陪同進行。</div>`,'螢火蟲夜遊。請選擇版本。');
   $('#vs').addEventListener('click',guard(e=>{const b=e.target.closest('.btn');if(b){location.hash=b.dataset.v;start(b.dataset.v)}}));$('#recs').addEventListener('click',guard(()=>{location.hash='records';records()}))}
 function start(key){setV(key);state=null;
   showIntro(`<header style="display:flex;flex-direction:column;gap:8px"><h1>${V.name}<span>.</span><span class="tag">${V.mins}</span></h1><p class="lede">${V.desc}</p><p class="note">請家人或工作人員陪同，可以替長輩唸題目，但不要提示答案。遊戲中右上角可開關語音與配樂。</p></header>
@@ -315,11 +315,11 @@ function result(){Audio.big();sparkle(14);
   showIntro(`<header><h1>${esc(rec.name)} 回家了<span>.</span><span class="tag">${V.name}</span></h1></header>
   <div class="panel"><div class="score">${adj} <span style="font-size:26px;color:var(--muted)">/ ${V.total}</span></div><div class="band ${cls}">${band}</div>${gaugeHtml(prob)}<p class="lede">${esc(advice)}</p></div>
   <div class="panel"><table><tr><th>站</th><th></th><th>得分</th></tr>${sections.map(s=>`<tr><td>${esc(s.name)}</td><td class="note">${esc(s.note)}</td><td>${s.got} / ${s.max}</td></tr>`).join('')}</table>
-  <p class="note">用時 ${mins} 分鐘，逾時 ${state?0:rec.timeouts} 次${adj!==raw?'，教育程度校正 +1 分':''}。判讀門檻偏向高敏感度（${V.cut[0]} 分以下即提示追蹤），延遲回憶低於 4 分會單獨降級。「認知障礙可能性」是依本版門檻推估的參考值，尚未以臨床樣本校正。</p><p class="note" id="saved">儲存中…</p></div>
+  <p class="note">用時 ${mins} 分鐘，逾時 ${state?0:rec.timeouts} 次${adj!==raw?'，教育程度校正 +1 分':''}。判讀門檻偏向高敏感度（${V.cut[0]} 分以下即提示追蹤），延遲回憶低於 4 分會單獨降級。「需要進一步評估的可能性」是依本版門檻推估的參考值，尚未以臨床樣本校正。</p><p class="note" id="saved">儲存中…</p></div>
   <div class="row">${btn('複製結果','','cp')}${btn('測下一位','primary','again')}</div><div class="row">${btn('回首頁','quiet','home')}${btn('查看記錄','quiet','recs')}</div>
   <p class="note">本工具為篩檢遊戲，不是醫療診斷，也不能取代臨床評估。</p>`,'遊戲結束。總分 '+adj+' 分。'+band);
   $('#cp').addEventListener('click',guard(()=>copyText(recText(rec))));$('#again').addEventListener('click',guard(()=>start(V.key)));$('#home').addEventListener('click',guard(()=>{location.hash='';home()}));$('#recs').addEventListener('click',guard(()=>{location.hash='records';records()}))}
-function recText(r){return `螢火蟲夜遊 ${r.vname||''} ${r.stamp}\n受試者 ${r.name}${r.age?'（'+r.age+' 歲）':''}\n總分 ${r.score}/${r.total}\n判讀：${r.band}\n認知障礙可能性（估計）約 ${Math.round((r.prob||0)*100)}%\n`+(r.sections||[]).map(s=>`${s.name} ${s.got}/${s.max}${s.note?'（'+s.note+'）':''}`).join('\n')+`\n用時 ${r.mins} 分鐘，逾時 ${r.timeouts} 次`}
+function recText(r){return `螢火蟲夜遊 ${r.vname||''} ${r.stamp}\n受試者 ${r.name}${r.age?'（'+r.age+' 歲）':''}\n總分 ${r.score}/${r.total}\n判讀：${r.band}\n需要進一步腦健康評估的可能性（估計）約 ${Math.round((r.prob||0)*100)}%\n`+(r.sections||[]).map(s=>`${s.name} ${s.got}/${s.max}${s.note?'（'+s.note+'）':''}`).join('\n')+`\n用時 ${r.mins} 分鐘，逾時 ${r.timeouts} 次`}
 function copyText(text){navigator.clipboard.writeText(text).then(()=>toast('已複製')).catch(()=>{const ta=document.createElement('textarea');ta.value=text;intro.appendChild(ta);ta.select();toast('請長按複製')})}
 let filterV='all';
 async function records(){setV(null);state=null;Audio.stop();
