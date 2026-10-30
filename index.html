@@ -145,14 +145,14 @@ function gaugeHtml(p){const pct=Math.round(p*100);return `<div class="gauge"><di
 
 // ---------- records ----------
 // ===== 設定：把 Google Apps Script 部署後的網址貼在引號裡，留空則只存在各裝置 =====
-const SHEET_URL='https://script.google.com/macros/s/AKfycby8niM7B0vLtVCUjMUtqeytRPYkRa8qH8IKPVqC_CzC33XLt-WIlYrb39BfAIpJJIgDeg/exec';
+const SHEET_URL='https://script.google.com/macros/s/AKfycbzCQUiChcu5FGWJqYquAbnWkwVJgGxmZGEkHde2UbGtKypMjaDFxzF9EPxjiXURAuQeyA/exec';
 let db=null, me=null, dbReady=Promise.resolve();
 const LS='cogscreen-all-records';
 function lsAll(){try{return JSON.parse(localStorage.getItem(LS)||'[]')}catch(e){return[]}}
 function lsSave(list){try{localStorage.setItem(LS,JSON.stringify(list.slice(-300)))}catch(e){}}
 async function saveRecord(rec){
   rec.id='l'+Date.now();const l=lsAll();l.push(rec);lsSave(l);
-  if(SHEET_URL){try{const r=await fetch(SHEET_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify(rec)});const j=await r.json();if(j&&j.ok)return {where:'shared',id:rec.id}}catch(e){}return {where:'failed',id:rec.id}}
+  if(SHEET_URL){try{const r=await fetch(SHEET_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify(rec)});if(r.ok)return {where:'shared',id:rec.id}}catch(e){}return {where:'failed',id:rec.id}}
   return {where:'local',id:rec.id}}
 async function loadRecords(){
   if(SHEET_URL){try{const r=await fetch(SHEET_URL+'?t='+Date.now());const j=await r.json();if(Array.isArray(j))return {where:'shared',list:j.sort((a,b)=>(b.ts||0)-(a.ts||0))}}catch(e){}return {where:'failed',list:lsAll().slice().reverse()}}
