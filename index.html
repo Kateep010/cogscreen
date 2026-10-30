@@ -290,9 +290,13 @@ async function flowEasy(){const q=V.key==='quick',w=state.words,foils=pick(WORDP
 function home(){setV(null);state=null;Audio.stop();
   showIntro(`<header style="display:flex;flex-direction:column;gap:8px"><h1>螢火蟲夜遊<span>.</span></h1><p class="lede">跟著螢火蟲走一趟夜間花園：記住寶物、看星空、抓螢火蟲、點亮燈籠，最後把寶物帶回家。全程只要用手指點按。</p><p class="note">篩檢用途，不應作為診斷依據，詳情請洽專業人員</p></header>
   <div class="panel"><h3>選一個版本</h3><div class="grid" style="grid-template-columns:1fr" id="vs">${Object.values(VERSIONS).map(v=>`<button type="button" class="btn vcard" data-v="${v.key}"><b>${v.name}<span class="tag">${v.mins}</span></b><span>適合：${v.who}</span><span>${v.desc}</span></button>`).join('')}</div></div>
-  <div class="row">${btn('查看所有受試者記錄','quiet','recs')}</div>
+  <div class="row">${btn('查看所有受試者記錄','quiet','recs')}${btn('測試試算表連線','quiet','diag')}</div><p class="note" id="diagout"></p>
   <div class="warnbox"><b>這是篩檢遊戲：</b>分數與「需要進一步評估的可能性」是依門檻推估的參考值，尚未以臨床樣本校正，不是診斷。建議由家人或工作人員陪同進行。</div>`,'螢火蟲夜遊。請選擇版本。');
-  $('#vs').addEventListener('click',guard(e=>{const b=e.target.closest('.btn');if(b){location.hash=b.dataset.v;start(b.dataset.v)}}));$('#recs').addEventListener('click',guard(()=>{location.hash='records';records()}))}
+  $('#vs').addEventListener('click',guard(e=>{const b=e.target.closest('.btn');if(b){location.hash=b.dataset.v;start(b.dataset.v)}}));$('#recs').addEventListener('click',guard(()=>{location.hash='records';records()}));
+  $('#diag').addEventListener('click',guard(async()=>{const o=$('#diagout');o.textContent='測試中…';let msg=[];
+    try{const r=await fetch(SHEET_URL+'?t='+Date.now());const t=await r.text();let j=null;try{j=JSON.parse(t)}catch(_){}msg.push('讀取：HTTP '+r.status+(Array.isArray(j)?'，目前 '+j.length+' 筆':'，回應不是 JSON：'+t.slice(0,60)))}catch(e){msg.push('讀取失敗：'+e)}
+    try{const r=await fetch(SHEET_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({name:'連線測試',vname:'診斷',ts:Date.now(),stamp:new Date().toLocaleString('zh-TW'),ua:navigator.userAgent.slice(0,80)})});const t=await r.text();msg.push('寫入：HTTP '+r.status+'，回應 '+t.slice(0,80))}catch(e){msg.push('寫入失敗：'+e)}
+    o.textContent=msg.join('　|　')}))}
 function start(key){setV(key);state=null;
   showIntro(`<header style="display:flex;flex-direction:column;gap:8px"><h1>${V.name}<span>.</span><span class="tag">${V.mins}</span></h1><p class="lede">${V.desc}</p><p class="note">請家人或工作人員陪同，可以替長輩唸題目，但不要提示答案。遊戲中右上角可開關語音與配樂。</p></header>
   <form id="form" class="panel"><h3>受試者資料</h3><div class="fields"><label class="field">姓名或代號（必填）<input id="pname" maxlength="30" autocomplete="off" placeholder="例如：王阿公、A03"></label><label class="field">年齡（可不填）<input id="page" type="number" min="40" max="120" inputmode="numeric" placeholder="歲"></label></div>
@@ -335,6 +339,7 @@ function detail(r){showIntro(`<header><h1>${esc(r.name||'（未填）')}<span>.<
   <div class="row">${btn('複製','','cp')}${btn('回列表','primary','back')}</div>`);
   $('#back').addEventListener('click',guard(records));$('#cp').addEventListener('click',guard(()=>copyText(recText(r))))}
 function route(){const h=location.hash.replace('#','');if(h==='records')records();else if(VERSIONS[h])start(h);else home()}
+window.addEventListener('error',e=>{toast('程式錯誤：'+(e.message||'').slice(0,80))});window.addEventListener('unhandledrejection',e=>{toast('程式錯誤：'+String(e.reason||'').slice(0,80))});
 window.addEventListener('beforeunload',e=>{if(state){e.preventDefault();e.returnValue=''}});
 window.addEventListener('hashchange',()=>{if(state)return;route()});
 route();
