@@ -66,8 +66,9 @@ input:focus-visible{outline:3px solid var(--glow);outline-offset:1px}
 body[data-v=std] .clocks{grid-template-columns:repeat(3,1fr)}
 .pad{display:grid;grid-template-columns:repeat(3,1fr);gap:10px} .pad .btn{min-height:64px}
 .entry{font-size:44px;font-weight:900;letter-spacing:.3em;text-align:center;min-height:66px;border-bottom:3px solid var(--line);color:var(--glow)}
-#catch{position:relative;width:100%;height:min(46vh,360px);border-radius:16px;overflow:hidden;background:rgba(20,35,58,.5);border:1px solid var(--line)}
-#catch canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+.arena{position:relative;width:100%;height:min(48vh,380px);border-radius:16px;overflow:hidden;background:rgba(20,35,58,.55);border:1px solid var(--line);touch-action:none}
+.arena canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+.arena.tall{height:min(56vh,440px)}
 .score{font-size:72px;font-weight:900;line-height:1;text-align:center;color:var(--glow);text-shadow:0 0 22px rgba(232,244,106,.5);font-variant-numeric:tabular-nums}
 .band{padding:14px;border-radius:12px;font-size:22px;font-weight:700;text-align:center;border:1px solid}
 .band.good{color:var(--good);border-color:var(--good);background:rgba(123,211,137,.1)} .band.warn{color:var(--warn);border-color:var(--warn);background:rgba(245,165,36,.1)} .band.bad{color:var(--bad);border-color:var(--bad);background:rgba(240,101,90,.1)}
@@ -106,13 +107,14 @@ const $=s=>document.querySelector(s);
 const intro=$('#scrIntro'), game=$('#scrGame'), task=$('#task');
 let V=null, state=null, lock=0, timerId=null, speaking=true, score=0;
 const VERSIONS={
-  std:   {key:'std',   name:'標準版', total:30, steps:9, mid:23.5, k:0.75, cut:[27,24], mins:'約 4 分鐘', who:'65 到 75 歲、視力與手部動作尚可', desc:'九站、多選題，完整走一趟夜間花園。', guard:450},
-  senior:{key:'senior',name:'樂齡版', total:22, steps:6, mid:15.5, k:1.0,  cut:[19,16], mins:'約 3 分鐘', who:'80 歲以上或體弱長者', desc:'六站、全部二選一、大字大按鈕、節奏慢。', guard:600},
-  quick: {key:'quick', name:'極速版', total:18, steps:6, mid:11.5, k:1.1,  cut:[15,12], mins:'約 2 分鐘', who:'專注力有限、需要最短時間', desc:'六站、二選一，偏重記憶與注意力。', guard:600}
+  std:   {key:'std',   name:'標準版', total:34, steps:11, mid:26.5, k:0.66, cut:[31,27], mins:'約 5 分鐘', who:'65 到 75 歲、視力與手部動作尚可', desc:'十一站，走完整座夜間花園。', guard:450},
+  senior:{key:'senior',name:'樂齡版', total:26, steps:9,  mid:18.5, k:0.85, cut:[22,19], mins:'約 3.5 分鐘', who:'80 歲以上或體弱長者', desc:'九站、全部二選一、大字大按鈕、節奏慢。', guard:600},
+  quick: {key:'quick', name:'極速版', total:18, steps:6,  mid:11.5, k:1.1,  cut:[15,12], mins:'約 2.5 分鐘', who:'專注力有限、需要最短時間', desc:'六站、偏重記憶、注意力與反應。', guard:600}
 };
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const shuffle=a=>{a=a.slice();for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a};
 const pick=(a,n)=>shuffle(a).slice(0,n);
+const median=a=>{if(!a.length)return NaN;const b=a.slice().sort((x,y)=>x-y);return b[Math.floor(b.length/2)]};
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function toast(t){const e=$('#toast');e.textContent=t;e.classList.add('show');setTimeout(()=>e.classList.remove('show'),1400)}
 function speak(t){ if(!speaking||!t) return; try{ const u=new SpeechSynthesisUtterance(t); u.lang='zh-TW'; u.rate=V&&V.key==='std'?.9:.8; speechSynthesis.cancel(); speechSynthesis.speak(u);}catch(e){} }
@@ -124,25 +126,25 @@ function setV(key){V=VERSIONS[key]||null;document.body.dataset.v=V?V.key:''}
 function showIntro(html,say){game.hidden=true;intro.hidden=false;intro.innerHTML=html;window.scrollTo(0,0);speak(say)}
 function showTask(html,say){intro.hidden=true;game.hidden=false;task.innerHTML=html;$('#stage').scrollTop=0;speak(say)}
 function setStep(n,label){$('#hudPhase').textContent=label;$('#lamps').innerHTML=Array.from({length:V.steps},(_,i)=>`<i class="${i<n?'on':''}"></i>`).join('')}
+const waitClick=id=>new Promise(r=>$(id).addEventListener('click',guard(r)));
 
-// ===== 音效與配樂（Web Audio 即時產生，無檔案） =====
+// ===== 音效與配樂 =====
 const Audio=(()=>{let ctx=null,master=null,playing=false,muted=false,timer=0,last=3;const SCALE=[261.63,293.66,329.63,392,440,523.25,587.33,659.25];
   function ensure(){const AC=window.AudioContext||window.webkitAudioContext;if(!AC)return false;if(!ctx){ctx=new AC();master=ctx.createGain();master.gain.value=.16;master.connect(ctx.destination)}if(ctx.state==='suspended')ctx.resume();return true}
   function tone(f,when,len,vol,type){const o=ctx.createOscillator(),e=ctx.createGain();o.type=type||'sine';o.frequency.value=f;e.gain.setValueAtTime(0,when);e.gain.linearRampToValueAtTime(vol,when+Math.min(.4,len*.2));e.gain.exponentialRampToValueAtTime(.0001,when+len);o.connect(e);e.connect(master);o.start(when);o.stop(when+len+.05)}
   function step(){if(!playing)return;last=Math.max(0,Math.min(SCALE.length-1,last+Math.floor(Math.random()*5)-2));const t=ctx.currentTime+.05;tone(SCALE[last],t,2.6,.5);if(Math.random()<.35)tone(SCALE[last]/2,t,4.2,.32);timer=setTimeout(step,900+Math.random()*1300)}
-  return {
-    start(){if(!ensure())return;clearTimeout(timer);playing=true;master.gain.setValueAtTime(muted?0:.16,ctx.currentTime);step()},
+  return {start(){if(!ensure())return;clearTimeout(timer);playing=true;master.gain.setValueAtTime(muted?0:.16,ctx.currentTime);step()},
     stop(){playing=false;clearTimeout(timer);if(ctx)master.gain.setValueAtTime(0,ctx.currentTime)},
     toggle(){muted=!muted;if(ctx)master.gain.setValueAtTime(muted?0:.16,ctx.currentTime);return !muted},
     good(){if(!ensure()||muted)return;const t=ctx.currentTime;tone(659.25,t,.35,.9);tone(880,t+.12,.5,.9)},
     big(){if(!ensure()||muted)return;const t=ctx.currentTime;[523.25,659.25,783.99,1046.5].forEach((f,i)=>tone(f,t+i*.1,.6,.8))},
     soft(){if(!ensure()||muted)return;tone(220,ctx.currentTime,.25,.5,'triangle')},
-    tick(){if(!ensure()||muted)return;tone(1200,ctx.currentTime,.06,.3)}
-  }})();
+    tick(){if(!ensure()||muted)return;tone(1200,ctx.currentTime,.06,.3)},
+    buzz(){if(!ensure()||muted)return;tone(420,ctx.currentTime,.3,.4,'sawtooth')}}})();
 $('#btnMusic').addEventListener('click',()=>{$('#btnMusic').textContent=Audio.toggle()?'♪ 開':'♪ 關'});
 $('#btnVoice').addEventListener('click',()=>{speaking=!speaking;$('#btnVoice').textContent=speaking?'🔊 語音':'🔇 語音';if(!speaking){try{speechSynthesis.cancel()}catch(e){}}});
 
-// ===== 背景：星空與漫遊的螢火蟲 =====
+// ===== 背景 =====
 const bg=$('#bg'),bgc=bg.getContext('2d');let flies=[],stars=[],burst=[];
 function fitBg(){const d=window.devicePixelRatio||1;bg.width=innerWidth*d;bg.height=innerHeight*d;bgc.setTransform(d,0,0,d,0,0);
   stars=Array.from({length:70},()=>({x:Math.random()*innerWidth,y:Math.random()*innerHeight*.7,r:.6+Math.random()*1.4,p:Math.random()*6}));
@@ -163,26 +165,45 @@ function drawBg(now){const W=innerWidth,H=innerHeight;bgc.clearRect(0,0,W,H);
   requestAnimationFrame(drawBg)}
 requestAnimationFrame(drawBg);
 function sparkle(n){const x=innerWidth/2,y=innerHeight*.45;for(let i=0;i<n;i++)burst.push({x,y,a:-Math.PI/2+(Math.random()-.5)*2.2,v:.5+Math.random(),t0:performance.now(),life:900+Math.random()*500})}
-
-// ===== 回饋：加分飛出、鼓勵字、HUD 分數 =====
-function addPoints(n,msg){if(n>0){score+=n;const h=$('#hudScore');h.textContent=score;h.classList.remove('bump');void h.offsetWidth;h.classList.add('bump');
-  const p=$('#pts');p.textContent='+'+n;p.classList.remove('fly');void p.offsetWidth;p.classList.add('fly');sparkle(Math.min(6,2+n));Audio.good()}else Audio.soft();
+function addPoints(n,msg){if(n>0){score+=n;const h=$('#hudScore');h.textContent=score;h.classList.remove('bump');void h.offsetWidth;h.classList.add('bump');const p=$('#pts');p.textContent='+'+n;p.classList.remove('fly');void p.offsetWidth;p.classList.add('fly');sparkle(Math.min(6,2+n));Audio.good()}else Audio.soft();
   const f=$('#fb');f.textContent=msg||(n>0?pick(['太棒了！','答對了！','很好！','厲害！'],1)[0]:'沒關係，繼續');f.classList.add('show');setTimeout(()=>f.classList.remove('show'),900)}
+
+// ===== 遊戲舞台：Canvas 上的小生物，可點擊 =====
+function makeArena(opts){opts=opts||{};const box=document.getElementById(opts.id||'arena');const cv=document.createElement('canvas');box.appendChild(cv);const c=cv.getContext('2d');
+  const A={box,cv,c,W:0,H:0,ents:[],alive:true,onTap:null,onMiss:null,draw:null};
+  function fit(){const r=box.getBoundingClientRect(),d=devicePixelRatio||1;if(cv.width!==Math.round(r.width*d)){cv.width=r.width*d;cv.height=r.height*d}c.setTransform(d,0,0,d,0,0);A.W=r.width;A.H=r.height}
+  fit();
+  cv.addEventListener('pointerdown',e=>{if(!A.alive)return;const r=cv.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top;let best=null,bd=1e9;
+    for(const en of A.ents){if(!en.alive||en.ghost)continue;const d=Math.hypot(en.x-x,en.y-(en.y0||en.y));const rad=Math.max(44,en.size*.7);if(d<rad&&d<bd){bd=d;best=en}}
+    if(best&&A.onTap)A.onTap(best,x,y);else if(A.onMiss)A.onMiss(x,y)});
+  (function loop(now){if(!A.alive||!document.body.contains(cv)){A.alive=false;return}fit();c.clearRect(0,0,A.W,A.H);
+    c.fillStyle='#0f2a2a';c.beginPath();c.moveTo(0,A.H);for(let x=0;x<=A.W;x+=30)c.lineTo(x,A.H*.82+Math.sin(x/60+now/2000)*6);c.lineTo(A.W,A.H);c.fill();
+    if(A.draw)A.draw(now);
+    for(const en of A.ents){if(!en.alive)continue;const yy=en.y+(en.bob?Math.sin(now/350+en.phase)*6:0);
+      if(en.glow){const g=c.createRadialGradient(en.x,yy,4,en.x,yy,en.size*.9);g.addColorStop(0,'rgba(232,244,106,.55)');g.addColorStop(1,'rgba(232,244,106,0)');c.fillStyle=g;c.beginPath();c.arc(en.x,yy,en.size*.9,0,7);c.fill()}
+      c.globalAlpha=en.alpha==null?1:en.alpha;
+      if(en.emoji==='🪰fly'){drawFirefly(c,en.x,yy,now,en.size/42)}else{c.font=`${en.size}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",serif`;c.textAlign='center';c.textBaseline='middle';c.save();c.translate(en.x,yy);if(en.flip)c.scale(-1,1);c.fillText(en.emoji,0,0);c.restore()}
+      if(en.label){c.font=`700 ${Math.max(18,en.size*.38)}px ${getComputedStyle(document.body).fontFamily}`;c.fillStyle=en.glow?'#e8f46a':'#eef3ea';c.fillText(en.label,en.x,yy+en.size*.62)}
+      c.globalAlpha=1}
+    requestAnimationFrame(loop)})(performance.now());
+  A.destroy=()=>{A.alive=false};A.fit=fit;return A}
+function gridSpots(n,W,H){const cols=n<=4?2:n<=6?3:n<=9?3:4,rows=Math.ceil(n/cols),out=[];for(let i=0;i<n;i++){const cx=(i%cols+.5)/cols*W,cy=(Math.floor(i/cols)+.5)/rows*(H*.78)+H*.06;out.push({x:cx+(Math.random()-.5)*W*.05,y:cy})}return out}
 
 // ===== 題庫 =====
 const WORDPOOL=[['蘋果','🍎'],['手錶','⌚'],['椅子','🪑'],['雨傘','☂️'],['鑰匙','🔑'],['香蕉','🍌'],['帽子','🧢'],['書本','📖'],['茶杯','🍵'],['汽車','🚗'],['花','🌸'],['眼鏡','👓'],['鉛筆','✏️'],['麵包','🍞'],['鞋子','👟'],['電話','📞'],['魚','🐟'],['房子','🏠']];
 const NAMEPOOL=[['🐘','大象'],['🦁','獅子'],['🐢','烏龜'],['🦒','長頸鹿'],['🐰','兔子'],['🐓','公雞'],['🐳','鯨魚'],['🦋','蝴蝶'],['🐑','綿羊'],['🐸','青蛙'],['🐷','豬'],['🐶','狗']];
 const ODDPOOL=[ [['香蕉','橘子','西瓜'],'火車'], [['公車','飛機','腳踏車'],'鉛筆'], [['醫生','老師','警察'],'月亮'], [['筷子','湯匙','叉子'],'雨傘'], [['紅色','藍色','綠色'],'冬天'], [['桌子','椅子','沙發'],'颱風'] ];
 const CLOCK_STD=[[11,10],[3,40],[7,25],[1,50],[9,15],[4,35]], CLOCK_EASY=[[11,0],[3,0],[7,30],[1,0],[9,30],[4,30]];
+const ODD_VISUAL=[['🦋','🐝'],['🐞','🐜'],['🌸','🌼'],['🐸','🐢'],['🐟','🐠']];
 
 // ===== 計分與推估 =====
 const sections=[];
-function addScore(name,got,max,note){sections.push({name,got:Math.max(0,Math.min(max,got)),max,note:note||''})}
+function addScore(name,got,max,note,extra){sections.push(Object.assign({name,got:Math.max(0,Math.min(max,got)),max,note:note||''},extra||{}))}
 function probImpair(v,s,recall){const logit=-v.k*(s-v.mid)+(recall<4?1.0:0);return 1/(1+Math.exp(-logit))}
 function probLevel(p){return p<.1?'很低':p<.25?'偏低':p<.5?'中等':p<.75?'偏高':'很高'}
 function gaugeHtml(p){const pct=Math.round(p*100);return `<div class="gauge"><div class="pct">${pct}%<small>需要進一步腦健康評估的可能性（估計）：${probLevel(p)}</small></div><div class="track"><span class="mark" style="left:${pct}%"></span></div><div class="lab"><span>0%</span><span>50%</span><span>100%</span></div></div>`}
 
-// ===== 記錄：Google 試算表，失敗時存本機 =====
+// ===== 記錄 =====
 const LS='cogscreen-all-records';
 function lsAll(){try{return JSON.parse(localStorage.getItem(LS)||'[]')}catch(e){return[]}}
 function lsSave(l){try{localStorage.setItem(LS,JSON.stringify(l.slice(-300)))}catch(e){}}
@@ -190,46 +211,96 @@ async function saveRecord(rec){rec.id='l'+Date.now();const l=lsAll();l.push(rec)
   if(SHEET_URL){let why='';try{const r=await fetch(SHEET_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify(rec)});const t=await r.text();let j=null;try{j=JSON.parse(t)}catch(_){}if(j&&j.ok)return {where:'shared'};why=j&&j.error?j.error:('HTTP '+r.status+' '+t.slice(0,80))}catch(e){why=String(e)}return {where:'failed',why}}return {where:'local'}}
 async function loadRecords(){if(SHEET_URL){try{const r=await fetch(SHEET_URL+'?t='+Date.now());const j=await r.json();if(Array.isArray(j))return {where:'shared',list:j.sort((a,b)=>(b.ts||0)-(a.ts||0))}}catch(e){}return {where:'failed',list:lsAll().slice().reverse()}}return {where:'local',list:lsAll().slice().reverse()}}
 
-// ===== 共用題型 =====
+// ===== 共用題型（按鈕式） =====
 const tmark=(r,note)=>{if(r==='timeout'){state.timeouts++;note.push('逾時')}};
 function twoChoice(title,a,b,say,ms){return new Promise(res=>{const opts=shuffle([a,b]);
   showTask(`<h2>${title}</h2><div class="grid cols2" id="o">${opts.map((o,i)=>`<button type="button" class="btn" data-i="${i}">${o.html}</button>`).join('')}</div>${btn('不確定','quiet','dk')}`,say||title.replace(/<[^>]+>/g,''));
-  const done=v=>{clearTimer();res(v)};
-  $('#o').addEventListener('click',guard(e=>{const x=e.target.closest('.btn');if(x)done(opts[+x.dataset.i]===a?'hit':'miss')}));$('#dk').addEventListener('click',guard(()=>done('dk')));deadline(ms||60000,()=>done('timeout'))})}
+  const done=v=>{clearTimer();res(v)};$('#o').addEventListener('click',guard(e=>{const x=e.target.closest('.btn');if(x)done(opts[+x.dataset.i]===a?'hit':'miss')}));$('#dk').addEventListener('click',guard(()=>done('dk')));deadline(ms||60000,()=>done('timeout'))})}
 function multiChoice(title,opts,ans,say,ms,cols){return new Promise(res=>{
   showTask(`<h2>${title}</h2><div class="grid ${cols||''}" id="o">${opts.map((o,i)=>`<button type="button" class="btn" data-i="${i}">${o}</button>`).join('')}</div>${btn('不確定','quiet','dk')}`,say||title.replace(/<[^>]+>/g,''));
-  const done=v=>{clearTimer();res(v)};
-  $('#o').addEventListener('click',guard(e=>{const x=e.target.closest('.btn');if(x)done(+x.dataset.i===ans?'hit':'miss')}));$('#dk').addEventListener('click',guard(()=>done('dk')));deadline(ms||30000,()=>done('timeout'))})}
-function pickN(title,opts,targets,n,say,ms,allowDk){return new Promise(res=>{let chosen=new Set();
-  showTask(`<h2>${title}</h2><p class="note" style="font-size:18px">請點選 ${n} 個，選好後按「確定」。</p><div class="grid cols3" id="opts">${opts.map((x,i)=>`<button type="button" class="btn" data-i="${i}"><span style="font-size:40px;display:block">${x[1]}</span>${esc(x[0])}</button>`).join('')}</div><div class="grid cols2">${allowDk?btn('不確定','quiet','dk'):''}${btn('確定','primary','ok')}</div>`,say||title);
-  $('#opts').addEventListener('click',guard(e=>{const b=e.target.closest('.btn');if(!b)return;const i=+b.dataset.i;if(chosen.has(i)){chosen.delete(i);b.classList.remove('picked')}else if(chosen.size<n){chosen.add(i);b.classList.add('picked');Audio.tick()}else toast('最多選 '+n+' 個')}));
-  const finish=t=>{clearTimer();let hit=0,miss=0;chosen.forEach(i=>{if(targets.includes(opts[i]))hit++;else miss++});res({hit,miss,timeout:t})};
-  $('#ok').addEventListener('click',guard(()=>{if(chosen.size<n){toast('請選滿 '+n+' 個');return}finish(false)}));if(allowDk)$('#dk').addEventListener('click',guard(()=>finish(false)));deadline(ms||45000,()=>finish(true))})}
+  const done=v=>{clearTimer();res(v)};$('#o').addEventListener('click',guard(e=>{const x=e.target.closest('.btn');if(x)done(+x.dataset.i===ans?'hit':'miss')}));$('#dk').addEventListener('click',guard(()=>done('dk')));deadline(ms||30000,()=>done('timeout'))})}
 const svgClock=(h,m)=>{const ha=(h%12)*30+m*.5,ma=m*6;const hand=(a,l,w)=>`<line x1="50" y1="50" x2="${(50+l*Math.sin(a*Math.PI/180)).toFixed(1)}" y2="${(50-l*Math.cos(a*Math.PI/180)).toFixed(1)}" stroke="currentColor" stroke-width="${w}" stroke-linecap="round"/>`;let ticks='';for(let i=1;i<=12;i++){const a=i*30*Math.PI/180;ticks+=`<text x="${(50+38*Math.sin(a)).toFixed(1)}" y="${(50-38*Math.cos(a)+4).toFixed(1)}" font-size="12" text-anchor="middle" fill="currentColor" font-weight="700">${i}</text>`}
   return `<svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="47" fill="rgba(232,244,106,.06)" stroke="currentColor" stroke-width="2.5"/>${ticks}${hand(ha,22,5)}${hand(ma,32,3)}<circle cx="50" cy="50" r="2.5" fill="currentColor"/></svg>`};
-function wordCard(x){return `<span style="font-size:52px;display:block">${x[1]}</span>${esc(x[0])}`}
+function clockQ(opts,label,ms){return new Promise(res=>{const ai=opts.findIndex(o=>o[2]);
+  showTask(`<h2>樹上的燈籠鐘，哪一個是 <span style="color:var(--glow)">${label}</span>？</h2><div class="clocks" id="c">${opts.map((o,i)=>`<button type="button" class="btn" data-i="${i}">${svgClock(o[0],o[1])}</button>`).join('')}</div>${btn('不確定','quiet','dk')}`,'哪一個時鐘是'+label+'？');
+  const done=v=>{clearTimer();res(v)};$('#c').addEventListener('click',guard(e=>{const b=e.target.closest('.btn');if(b)done(+b.dataset.i===ai?'hit':'miss')}));$('#dk').addEventListener('click',guard(()=>done('dk')));deadline(ms,()=>done('timeout'))})}
 function orientQs(){const now=new Date(),m=now.getMonth();return{
   tod:{q:'現在大約是一天中的什麼時候？',opts:['早上','中午','下午','晚上'],ans:(h=>h<11?0:h<14?1:h<18?2:3)(now.getHours())},
   season:{q:'現在是什麼季節？',opts:['春天','夏天','秋天','冬天'],ans:m>=2&&m<=4?0:m>=5&&m<=7?1:m>=8&&m<=10?2:3},
   weekday:{q:'今天是星期幾？',opts:['星期日','星期一','星期二','星期三','星期四','星期五','星期六'],ans:now.getDay()},
   month:{q:'現在是幾月？',opts:Array.from({length:12},(_,i)=>(i+1)+' 月'),ans:now.getMonth()}}}
+async function station(n,title,say){setStep(n,title);showTask(`<h3>第 ${n} 站</h3><h1>${title}<span>.</span></h1><p class="lede">${say}</p>${btn('出發','primary','s')}`,title+'。'+say);await waitClick('#s')}
 
-// 抓螢火蟲（go/no-go）：Canvas 動畫，螢火蟲飛進來就按，飛蛾與蝙蝠不要按
+// ===== 小遊戲 =====
+// 收集寶物：寶物一樣一樣飄進來，點它放進籃子（記憶登錄）
+async function collectGame(w){
+  showTask(`<h2>寶物飄過來了，點一下放進籃子</h2><p class="note" style="font-size:18px">請記住這三樣寶物，等一下回家時會再問。</p><div class="arena" id="arena"></div><p class="timer" id="basket">🧺 籃子裡：—</p>`,'寶物飄過來了，點一下放進籃子。請記住這三樣寶物。');
+  const A=makeArena();let got=[];
+  for(const x of w){const en={emoji:x[1],label:x[0],x:A.W*.5,y:A.H*.42,size:96,bob:true,phase:0,alive:true,alpha:0};A.ents=[en];
+    for(let k=0;k<=10;k++){en.alpha=k/10;await sleep(40)}
+    speak(x[0]);
+    await new Promise(res=>{let done=false;const fin=()=>{if(done)return;done=true;clearTimer();res()};A.onTap=()=>{Audio.tick();en.glow=true;fin()};deadline(8000,fin)});
+    got.push(x[0]);$('#basket').textContent='🧺 籃子裡：'+got.join('、');
+    for(let k=0;k<=12;k++){en.y=A.H*.42+(A.H*.95-A.H*.42)*k/12;en.size=96-60*k/12;await sleep(30)}en.alive=false;await sleep(300)}
+  A.ents=w.map((x,i)=>({emoji:x[1],label:x[0],x:A.W*(.25+.25*i),y:A.H*.45,size:80,bob:true,phase:i,alive:true,glow:true}));
+  speak('三樣寶物：'+w.map(x=>x[0]).join('、')+'。請跟著唸一次。');
+  for(let s=V.key==='std'?6:8;s>0;s--){const el=$('#basket');if(!el)return false;el.textContent='🧺 '+got.join('、')+'　還有 '+s+' 秒';await sleep(1000)}
+  A.destroy();return true}
+// 草地上找寶物：散落的東西裡點出目標（辨認）
+function fieldPick(title,opts,targets,n,say,ms,allowDk){return new Promise(res=>{
+  showTask(`<h2>${title}</h2><p class="note" style="font-size:18px">點選 ${n} 個，選好後按「確定」。再點一次可取消。</p><div class="arena tall" id="arena"></div><div class="grid cols2">${allowDk?btn('不確定','quiet','dk'):''}${btn('確定','primary','ok')}</div>`,say||title);
+  const A=makeArena();const spots=gridSpots(opts.length,A.W,A.H);
+  A.ents=opts.map((x,i)=>({emoji:x[1],label:x[0],x:spots[i].x,y:spots[i].y,size:Math.min(72,A.W/(opts.length<=6?5:6)),bob:true,phase:i*1.3,alive:true,item:x}));
+  let chosen=new Set();A.onTap=en=>{if(en.glow){en.glow=false;chosen.delete(en.item)}else if(chosen.size<n){en.glow=true;chosen.add(en.item);Audio.tick()}else toast('最多選 '+n+' 個')};
+  const finish=t=>{clearTimer();A.destroy();let hit=0,miss=0;chosen.forEach(x=>{if(targets.includes(x))hit++;else miss++});res({hit,miss,timeout:t})};
+  $('#ok').addEventListener('click',guard(()=>{if(chosen.size<n){toast('請選滿 '+n+' 個');return}finish(false)}));if(allowDk)$('#dk').addEventListener('click',guard(()=>finish(false)));deadline(ms||50000,()=>finish(true))})}
+// 抓螢火蟲（go/no-go）
 async function catchGame(n,nt,isPractice,showMs,gapMs){
-  const seq=shuffle(Array.from({length:n},(_,i)=>i<nt?'fly':['moth','bat','moth'][i%3]));let hits=0,fa=0,pressed=false,cur=null,t0=0;
-  showTask(`<h2>${isPractice?'先練習：':''}螢火蟲飛進來就按「抓！」</h2><p class="note" style="font-size:18px">飛蛾 🦋 和蝙蝠 🦇 不要按。</p><div id="catch"><canvas id="cc"></canvas></div>${btn('抓！','primary','go')}`,isPractice?'先練習。螢火蟲飛進來就按抓，飛蛾和蝙蝠不要按。':'正式開始。螢火蟲飛進來就按抓。');
-  const box=$('#catch'),cc=$('#cc'),c=cc.getContext('2d');const fit=()=>{const r=box.getBoundingClientRect(),d=devicePixelRatio||1;cc.width=r.width*d;cc.height=r.height*d;c.setTransform(d,0,0,d,0,0);return r};let R=fit();
-  let caught=false;$('#go').addEventListener('click',()=>{if(cur&&!pressed){pressed=true;if(cur==='fly'){caught=true;Audio.good();sparkle(3)}else Audio.soft()}});
-  let alive=true;(function loop(now){if(!alive||!document.body.contains(cc))return;R=fit();const W=R.width,H=R.height;c.clearRect(0,0,W,H);
-    if(cur){const k=Math.min(1,(now-t0)/showMs);const x=W*.1+(W*.8)*(caught?Math.min(1,k*1.6):k*.5+.25*Math.sin(k*3)),y=H*.5+Math.sin(now/300)*18;
-      if(cur==='fly'){drawFirefly(c,x,y,now,caught?1.9:1.6);if(caught){const g=c.createRadialGradient(x,y,0,x,y,60);g.addColorStop(0,'rgba(232,244,106,.5)');g.addColorStop(1,'rgba(232,244,106,0)');c.fillStyle=g;c.beginPath();c.arc(x,y,60,0,7);c.fill()}}
-      else{c.font='80px serif';c.textAlign='center';c.textBaseline='middle';c.fillText(cur==='moth'?'🦋':'🦇',x,y)}}
-    requestAnimationFrame(loop)})(performance.now());
-  await sleep(1800);
-  for(const s of seq){pressed=false;caught=false;cur=s;t0=performance.now();await sleep(showMs);if(!document.body.contains(cc)){alive=false;return null}
-    if(s==='fly'){if(pressed)hits++}else if(pressed)fa++;cur=null;await sleep(gapMs)}
-  alive=false;return {hits,fa,nt,nn:n-nt};
-}
+  const seq=shuffle(Array.from({length:n},(_,i)=>i<nt?'fly':['🦋','🦇','🐛'][i%3]));let hits=0,fa=0,pressed=false;
+  showTask(`<h2>${isPractice?'先練習：':''}螢火蟲飛進來就按「抓！」</h2><p class="note" style="font-size:18px">蝴蝶、蝙蝠、毛毛蟲飛進來時不要按。</p><div class="arena" id="arena"></div>${btn('抓！','primary','go')}`,isPractice?'先練習。螢火蟲飛進來就按抓，其他的不要按。':'正式開始。螢火蟲飛進來就按抓。');
+  const A=makeArena();let cur=null;
+  $('#go').addEventListener('click',()=>{if(cur&&!pressed){pressed=true;if(cur.emoji==='🪰fly'){cur.glow=true;cur.size=70;Audio.good();sparkle(3)}else Audio.soft()}});
+  await sleep(1500);
+  for(const s of seq){pressed=false;cur={emoji:s==='fly'?'🪰fly':s,x:-40,y:A.H*.45,size:s==='fly'?56:76,bob:true,phase:0,alive:true};A.ents=[cur];
+    const t0=performance.now();const en=cur;const fly=()=>{if(!en.alive||!A.alive)return;const k=(performance.now()-t0)/showMs;en.x=A.W*.1+A.W*.8*(en.glow?Math.min(1,k*1.5):k*.6);if(k<1)requestAnimationFrame(fly)};fly();
+    await sleep(showMs);if(!A.alive)return null;if(s==='fly'){if(pressed)hits++}else if(pressed)fa++;en.alive=false;cur=null;await sleep(gapMs)}
+  A.destroy();return {hits,fa,nt,nn:n-nt}}
+// 拍蚊子（反應時間）
+async function mosquitoGame(trials,isPractice){
+  showTask(`<h2>${isPractice?'先練習：':''}蚊子停下來就拍牠</h2><p class="note" style="font-size:18px">蚊子會隨機出現在畫面上，看到就馬上點牠。</p><div class="arena tall" id="arena"></div><p class="timer" id="rt"></p>`,isPractice?'先練習。蚊子停下來就拍牠。':'正式開始。蚊子停下來就馬上拍牠。');
+  const A=makeArena();let rts=[],falses=0,misses=0;
+  for(let i=0;i<trials;i++){A.ents=[];A.onTap=null;A.onMiss=()=>{falses++;Audio.soft()};await sleep(900+Math.random()*1600);if(!A.alive)return null;
+    const en={emoji:'🦟',x:A.W*.15+Math.random()*A.W*.7,y:A.H*.12+Math.random()*A.H*.6,size:72,alive:true,flip:Math.random()<.5};A.ents=[en];const t0=performance.now();Audio.buzz();
+    const r=await new Promise(res=>{let done=false;const fin=v=>{if(done)return;done=true;clearTimer();res(v)};A.onTap=()=>{const rt=performance.now()-t0;en.emoji='💥';en.glow=true;Audio.good();fin(rt)};A.onMiss=()=>{falses++;Audio.soft()};deadline(2500,()=>fin(null))});
+    if(r==null){misses++;en.alive=false}else{rts.push(r);$('#rt').textContent=isPractice?'反應 '+Math.round(r)+' 毫秒':'拍到了！';await sleep(350)}}
+  A.destroy();return {rts,falses,misses,trials}}
+// 找出不一樣的（視覺搜尋）
+async function oddVisualGame(rounds){
+  let correct=0,rts=[],note=[];
+  for(let r=0;r<rounds.length;r++){const n=rounds[r];const [same,odd]=pick(ODD_VISUAL,1)[0];
+    showTask(`<h2>這群 ${same} 裡面，有一個不一樣，找出來</h2><div class="arena tall" id="arena"></div>${btn('不確定','quiet','dk')}`,'這群裡面有一個不一樣的，找出來。');
+    const A=makeArena();const spots=gridSpots(n,A.W,A.H);const oi=Math.floor(Math.random()*n);
+    A.ents=spots.map((p,i)=>({emoji:i===oi?odd:same,x:p.x,y:p.y,size:Math.min(64,A.W/(n<=6?5:n<=9?6:7)),bob:true,phase:i,alive:true,isOdd:i===oi,flip:Math.random()<.5}));
+    const t0=performance.now();
+    const res=await new Promise(res=>{const fin=v=>{clearTimer();res(v)};A.onTap=en=>{if(en.isOdd){en.glow=true;fin('hit')}else{Audio.soft();en.alpha=.35}};$('#dk').addEventListener('click',guard(()=>fin('dk')));deadline(25000,()=>fin('timeout'))});
+    if(res==='hit'){correct++;rts.push(performance.now()-t0);addPoints(1)}else addPoints(0);tmark(res,note);A.destroy();await sleep(500)}
+  return {correct,rt:median(rts),note}}
+// 星星密碼（空間廣度倒序）
+async function starSpanGame(len){
+  showTask(`<h2>星星會一顆一顆亮起來</h2><p class="note" style="font-size:18px">看完後，請<b>倒著</b>點回來。例如先亮 A 再亮 B，就先點 B 再點 A。</p><div class="arena tall" id="arena"></div><p class="timer" id="hint"></p>`,'星星會一顆一顆亮起來，看完後請倒著點回來。');
+  const A=makeArena();const spots=[[.2,.2],[.5,.15],[.8,.22],[.3,.5],[.68,.48],[.18,.78],[.5,.72],[.82,.78]].map(([x,y])=>({x:x*A.W,y:y*A.H}));
+  A.ents=spots.map((p,i)=>({emoji:'⭐',x:p.x,y:p.y,size:58,alive:true,alpha:.35,idx:i}));
+  const seq=pick(A.ents.map(e=>e.idx),len);await sleep(1200);
+  for(const i of seq){const en=A.ents[i];en.alpha=1;en.glow=true;Audio.tick();await sleep(800);en.alpha=.35;en.glow=false;await sleep(350);if(!A.alive)return null}
+  $('#hint').textContent='請倒著點';speak('請倒著點');
+  const tapped=[];const r=await new Promise(res=>{const fin=v=>{clearTimer();res(v)};A.onTap=en=>{if(tapped.includes(en.idx))return;tapped.push(en.idx);en.alpha=1;en.glow=true;Audio.tick();if(tapped.length>=len)fin('done')};deadline(30000,()=>fin('timeout'))});
+  A.destroy();const ok=r==='done'&&tapped.join()===seq.slice().reverse().join();return {ok,timeout:r==='timeout'}}
+// 動物探頭（命名）
+async function peekNaming(it,opts,ms,cols){
+  showTask(`<h2>草叢裡有動物探出頭，牠是什麼？</h2><div class="arena" id="arena"></div><div class="grid ${cols}" id="o">${opts.map((o,i)=>`<button type="button" class="btn" data-i="${i}">${esc(o[1])}</button>`).join('')}</div>${btn('不確定','quiet','dk')}`,'草叢裡有動物探出頭，牠是什麼？');
+  const A=makeArena();const en={emoji:it[0],x:A.W*.5,y:A.H*1.1,size:120,alive:true};A.ents=[en];for(let k=0;k<=14;k++){en.y=A.H*1.1-(A.H*.65)*k/14;await sleep(28)}en.bob=true;en.phase=0;
+  const r=await new Promise(res=>{const fin=v=>{clearTimer();res(v)};$('#o').addEventListener('click',guard(e=>{const b=e.target.closest('.btn');if(b)fin(opts[+b.dataset.i]===it?'hit':'miss')}));$('#dk').addEventListener('click',guard(()=>fin('dk')));deadline(ms,()=>fin('timeout'))});
+  A.destroy();return r}
 // 點亮燈籠（連線）
 function trail(labels,instr,ms,maxErr){return new Promise(res=>{const pts=[];let tries=0;const gap=V.key==='std'?20:26;
   while(pts.length<labels.length&&tries++<3000){const x=14+Math.random()*72,y=16+Math.random()*48;if(pts.every(p=>Math.hypot(p.x-x,(p.y-y)*1.3)>gap))pts.push({x,y})}
@@ -240,55 +311,62 @@ function trail(labels,instr,ms,maxErr){return new Promise(res=>{const pts=[];let
     if(i===next){n.classList.add('done');path.push(pts[i].x+','+pts[i].y);$('#pl').setAttribute('points',path.join(' '));Audio.tick();next++;if(next>=labels.length){Audio.big();sparkle(6);setTimeout(()=>done(false),500)}}
     else{err++;Audio.soft();n.classList.remove('wrong');void n.offsetWidth;n.classList.add('wrong');if(err>=maxErr)done(false)}}));
   deadline(ms,()=>done(true))})}
-function clockQ(h,m,opts,label,ms){return new Promise(res=>{const ai=opts.findIndex(o=>o[2]);
-  showTask(`<h2>樹上的燈籠鐘，哪一個是 <span style="color:var(--glow)">${label}</span>？</h2><div class="clocks" id="c">${opts.map((o,i)=>`<button type="button" class="btn" data-i="${i}">${svgClock(o[0],o[1])}</button>`).join('')}</div>${btn('不確定','quiet','dk')}`,'哪一個時鐘是'+label+'？');
-  const done=v=>{clearTimer();res(v)};$('#c').addEventListener('click',guard(e=>{const b=e.target.closest('.btn');if(b)done(+b.dataset.i===ai?'hit':'miss')}));$('#dk').addEventListener('click',guard(()=>done('dk')));deadline(ms,()=>done('timeout'))})}
-async function station(n,title,say){setStep(n,title);showTask(`<h3>第 ${n} 站</h3><h1>${title}<span>.</span></h1><p class="lede">${say}</p>${btn('出發','primary','s')}`,title+'。'+say);await new Promise(r=>$('#s').addEventListener('click',guard(r)))}
-async function registerWords(w,secs){showTask(`<h2>螢火蟲帶來三樣寶物，請記住</h2><p class="note" style="font-size:18px">等一下回家時會再問。請跟著唸一次。</p><div class="words">${w.map(x=>`<div class="word"><small>${x[1]}</small>${esc(x[0])}</div>`).join('')}</div><p class="timer" id="cd"></p>`,'螢火蟲帶來三樣寶物，請記住：'+w.map(x=>x[0]).join('、')+'。請跟著唸一次。');
-  for(let s=secs;s>0;s--){const el=$('#cd');if(!el)return false;el.textContent='還有 '+s+' 秒';await sleep(1000)}return true}
 
-// ================= 標準版 =================
+// ===== 共用站 =====
+async function stRegister(n,w){await station(n,'收集寶物','螢火蟲在花園入口等您，牠要送您三樣寶物。');if(!await collectGame(w))return false;
+  const r=await fieldPick('草地上哪三樣是您籃子裡的寶物？',shuffle(w.concat(pick(WORDPOOL.filter(x=>!w.includes(x)),3))),w,3,'草地上哪三樣是您籃子裡的寶物？請點選三個。',45000,false);
+  if(r.timeout)state.timeouts++;addPoints(r.hit);addScore('即時記憶',r.hit,3,r.timeout?'逾時':'');return true}
+async function stOrient(n,list,cols,T){await station(n,'抬頭看星空','從星空和月亮，猜猜現在的時間。');const Q=orientQs();let got=0,note=[];for(const k of list){const it=Q[k];const r=await multiChoice(esc(it.q),it.opts.map(esc),it.ans,it.q,T,cols);if(r==='hit')got++;addPoints(r==='hit'?1:0);tmark(r,note)}addScore('定向感',got,list.length,note.join(' '))}
+async function stCatch(n,pr,main,showMs,gapMs,maxPts){await station(n,'抓螢火蟲','草叢裡會飛出各種小蟲，只抓螢火蟲。');const p=await catchGame(pr[0],pr[1],true,showMs,gapMs);if(!p)return false;
+  showTask(`<h2>練習結束，正式開始</h2><p class="lede">一樣，看到螢火蟲才按。</p>${btn('開始','primary','s')}`,'練習結束，正式開始。');await waitClick('#s');
+  const r=await catchGame(main[0],main[1],false,showMs,gapMs);if(!r)return false;const s=Math.round(maxPts*Math.max(0,r.hits/r.nt-r.fa/r.nn));addPoints(s,`抓到 ${r.hits} 隻！`);addScore('注意力',s,maxPts,`命中 ${r.hits}/${r.nt}，誤按 ${r.fa}`);return true}
+async function stMosquito(n,trials){await station(n,'拍蚊子','蚊子會停在畫面上，看到就馬上拍牠，越快越好。');const p=await mosquitoGame(2,true);if(!p)return false;const r=await mosquitoGame(trials,false);if(!r)return false;
+  const md=median(r.rts);const hitRate=r.rts.length/r.trials;const s=!(hitRate>=.6)?0:md<=700?2:md<=1100?1:0;addPoints(s,r.rts.length?`中位反應 ${Math.round(md)} 毫秒`:undefined);
+  addScore('反應速度',s,2,`拍到 ${r.rts.length}/${r.trials}，中位 ${isNaN(md)?'—':Math.round(md)+' ms'}，誤拍 ${r.falses}`,{rt:isNaN(md)?null:Math.round(md)});return true}
+async function stOdd(n,rounds){await station(n,'找出不一樣的','一群小生物裡躲了一個不一樣的，把牠找出來。');const r=await oddVisualGame(rounds);addScore('視覺搜尋',r.correct,rounds.length,r.note.join(' ')+(isNaN(r.rt)?'':' 中位 '+Math.round(r.rt)+' ms'),{rt2:isNaN(r.rt)?null:Math.round(r.rt)})}
+async function stClock(n,pool,count,easy,T,ptsEach){await station(n,'燈籠鐘','樹上掛著燈籠鐘，找出正確的時間。');let got=0,note=[];for(const [h,m] of pick(pool,count)){let opts,label;if(easy){const wr=[(h+4)%12||12,m];opts=shuffle([[h,m,true],[wr[0],wr[1],false]]);label=m===0?`${h} 點整`:`${h} 點半`}else{const wrongs=[[(m/5)|0||12,h*5%60],[h,(m+30)%60]];opts=shuffle([[h,m,true]].concat(wrongs.map(x=>[x[0],x[1],false])));label=`${h} 點 ${m} 分`}
+  const r=await clockQ(opts,label,T);if(r==='hit')got++;addPoints(r==='hit'?ptsEach:0);tmark(r,note)}addScore('時鐘辨認',got*ptsEach,count*ptsEach,note.join(' '))}
+async function stTrailEasy(n,ms){await station(n,'點亮燈籠','照順序點亮小路上的五盞燈籠。');const a=await trail(['1','2','3','4','5'],'請照順序點亮 1、2、3、4、5',ms,5);let s=!a.finished?0:a.err<=1?2:a.err<=3?1:0;let note=`錯誤 ${a.err}`;if(a.timeout){state.timeouts++;note+=' 逾時'}addPoints(s);addScore('執行功能（連線）',s,2,note)}
+async function stRecall(n,w,foilN,T){await station(n,'寶物回家','回到花園入口了。一開始籃子裡的三樣寶物是哪些？');
+  const r=await fieldPick('一開始籃子裡的三樣寶物是哪些？',shuffle(w.concat(pick(WORDPOOL.filter(x=>!w.includes(x)),foilN))),w,3,'一開始籃子裡的三樣寶物是哪些？請點選三個。',T,true);
+  if(r.timeout)state.timeouts++;const s=Math.max(0,r.hit*2-r.miss);addPoints(s,r.hit===3?'全部帶回家了！':undefined);addScore('延遲回憶',s,6,`記得 ${r.hit}/3`+(r.timeout?' 逾時':''))}
+
+// ================= 標準版（11 站） =================
 async function flowStd(){const w=state.words;
-  await station(1,'寶物登錄','螢火蟲在花園入口等您，牠帶來三樣寶物。');if(!await registerWords(w,8))return;
-  {const r=await pickN('剛才的三樣寶物是哪些？',shuffle(w.concat(pick(WORDPOOL.filter(x=>!w.includes(x)),3))),w,3,'剛才的三樣寶物是哪些？請點選三個。',45000,false);if(r.timeout)state.timeouts++;addPoints(r.hit);addScore('即時記憶',r.hit,3,r.timeout?'逾時':'')}
-  await station(2,'抬頭看星空','從星空和月亮，猜猜現在的時間。');{const Q=orientQs();let got=0,note=[];for(const it of [Q.weekday,Q.month,Q.tod]){const r=await multiChoice(esc(it.q),it.opts.map(esc),it.ans,it.q,30000);if(r==='hit')got++;addPoints(r==='hit'?1:0);tmark(r,note)}addScore('定向感',got,3,note.join(' '))}
-  await station(3,'抓螢火蟲','草叢裡會飛出各種小蟲，只抓螢火蟲。');{const p=await catchGame(5,2,true,1100,400);if(!p)return;showTask(`<h2>練習結束，正式開始</h2><p class="lede">一樣，看到螢火蟲才按。</p>${btn('開始','primary','s')}`,'練習結束，正式開始。');await new Promise(r=>$('#s').addEventListener('click',guard(r)));
-   const r=await catchGame(20,8,false,1100,400);if(!r)return;const s=Math.round(4*Math.max(0,r.hits/r.nt-r.fa/r.nn));addPoints(s,`抓到 ${r.hits} 隻！`);addScore('注意力',s,4,`命中 ${r.hits}/${r.nt}，誤按 ${r.fa}`)}
-  await station(4,'燈籠鐘','樹上掛著幾個燈籠鐘，找出正確的時間。');{let got=0,note=[];for(const [h,m] of pick(CLOCK_STD,2)){const wrongs=[[(m/5)|0||12,h*5%60],[h,(m+30)%60]];const opts=shuffle([[h,m,true]].concat(wrongs.map(x=>[x[0],x[1],false])));const r=await clockQ(h,m,opts,`${h} 點 ${m} 分`,30000);if(r==='hit')got++;addPoints(r==='hit'?1:0);tmark(r,note)}addScore('時鐘辨認',got,2,note.join(' '))}
-  await station(5,'點亮燈籠','照順序點亮小路上的燈籠。');{const a=await trail(['1','2','3','4','5'],'請依序點亮 1、2、3、4、5',40000,4);const b=await trail(['1','A','2','B','3','C'],'請輪流點亮：1、A、2、B、3、C',60000,4);let s=0,note=[];if(a.finished&&a.err<=1)s+=1;if(b.finished)s+=b.err===0?3:b.err===1?2:b.err===2?1:0;if(a.timeout||b.timeout){state.timeouts++;note.push('逾時')}note.push(`錯誤 ${a.err}+${b.err}`);addPoints(s);addScore('執行功能（連線）',s,4,note.join(' '))}
-  await station(6,'夜裡的動物','花園裡的動物探出頭來，牠們叫什麼？');{let got=0,note=[];for(const it of pick(NAMEPOOL,3)){const opts=shuffle([it].concat(pick(NAMEPOOL.filter(x=>x!==it),3)));const r=await multiChoice(`這是什麼動物？<div class="stim">${it[0]}</div>`,opts.map(o=>esc(o[1])),opts.indexOf(it),'這是什麼動物？',25000,'cols2');if(r==='hit')got++;addPoints(r==='hit'?1:0);tmark(r,note)}addScore('命名',got,3,note.join(' '))}
-  await station(7,'找出不同的','四樣東西裡，有一樣和其他不是同一類。');{let got=0,note=[];for(const [same,odd] of pick(ODDPOOL,2)){const opts=shuffle(same.concat([odd]));const r=await multiChoice('哪一個和其他三個<b>不是同一類</b>？',opts.map(esc),opts.indexOf(odd),'哪一個和其他三個不是同一類？'+opts.join('、'),30000,'cols2');if(r==='hit')got++;addPoints(r==='hit'?1:0);tmark(r,note)}addScore('抽象分類',got,2,note.join(' '))}
-  await station(8,'星星密碼','星星會一顆一顆閃出數字，請倒著點回來。');{const trialD=async n=>{let d=[];while(d.length<n){const x=1+Math.floor(Math.random()*9);if(!d.includes(x))d.push(x)}
-    showTask(`<h2>請記住這些數字</h2><p class="note" style="font-size:18px">等一下要<b>倒著</b>點回來。</p><div class="stim" id="st"></div>`,'請記住這些數字，等一下要倒著點回來。');await sleep(1200);
-    for(const x of d){const st=$('#st');if(!st)return null;st.textContent=x;speak(String(x));Audio.tick();await sleep(1000);st.textContent='';await sleep(350)}
-    return new Promise(res=>{let entry=[];showTask(`<h2>請<b>倒著</b>點出剛才的數字</h2><p class="note" style="font-size:18px">例如看到 2、5，就點 5、2。</p><div class="entry" id="en">&nbsp;</div><div class="pad" id="pad">${[1,2,3,4,5,6,7,8,9].map(x=>`<button type="button" class="btn" data-d="${x}">${x}</button>`).join('')}${btn('清除','quiet','clr')}${btn('不確定','quiet','dk')}${btn('確定','primary','ok')}</div>`,'請倒著點出剛才的數字。');
-      const done=(ok,t)=>{clearTimer();res({ok,t})};
-      $('#pad').addEventListener('click',guard(e=>{const b=e.target.closest('.btn');if(!b)return;if(b.dataset.d){if(entry.length<n){entry.push(+b.dataset.d);$('#en').textContent=entry.join(' ');Audio.tick()}else toast('已經 '+n+' 個了')}else if(b.id==='clr'){entry=[];$('#en').innerHTML='&nbsp;'}else if(b.id==='dk'){done(false,false)}else if(b.id==='ok'){if(entry.length<n){toast('還差 '+(n-entry.length)+' 個');return}done(entry.join()===d.slice().reverse().join(),false)}}));
-      deadline(40000,()=>done(false,true))})};
-   const a=await trialD(3);if(!a)return;addPoints(a.ok?2:0);const b=await trialD(4);if(!b)return;addPoints(b.ok?1:0);let note=[];if(a.t||b.t){state.timeouts++;note.push('逾時')}addScore('工作記憶（倒序）',(a.ok?2:0)+(b.ok?1:0),3,note.join(' '))}
-  await station(9,'寶物回家','回到花園入口了。一開始的三樣寶物是哪些？');{const r=await pickN('一開始的三樣寶物是哪些？',shuffle(w.concat(pick(WORDPOOL.filter(x=>!w.includes(x)),6))),w,3,'一開始的三樣寶物是哪些？請點選三個。',45000,true);if(r.timeout)state.timeouts++;const s=Math.max(0,r.hit*2-r.miss);addPoints(s,r.hit===3?'全部帶回家了！':undefined);addScore('延遲回憶',s,6,`記得 ${r.hit}/3`+(r.timeout?' 逾時':''))}
-  result();}
-
-// ================= 樂齡版 / 極速版 =================
-async function flowEasy(){const q=V.key==='quick',w=state.words,foils=pick(WORDPOOL.filter(x=>!w.includes(x)),3),T=q?30000:60000;
-  await station(1,'寶物登錄','螢火蟲在花園入口等您，牠帶來三樣寶物。');if(!await registerWords(w,q?8:12))return;
-  {let got=0,note=[];for(let i=0;i<3;i++){const r=await twoChoice('剛才有哪一個？',{html:wordCard(w[i])},{html:wordCard(foils[i])},'剛才有哪一個？'+w[i][0]+'，還是'+foils[i][0]+'？',T);if(r==='hit')got++;addPoints(r==='hit'?1:0);tmark(r,note)}addScore('即時記憶',got,3,note.join(' '))}
-  await station(2,'抬頭看星空','從星空和月亮，猜猜現在的時間。');{const Q=orientQs();const list=q?[Q.tod,Q.weekday]:[Q.tod,Q.season,Q.weekday];let got=0,note=[];for(const it of list){const r=await multiChoice(esc(it.q),it.opts.map(esc),it.ans,it.q,T,'cols2');if(r==='hit')got++;addPoints(r==='hit'?1:0);tmark(r,note)}addScore('定向感',got,list.length,note.join(' '))}
-  await station(3,'抓螢火蟲','草叢裡會飛出各種小蟲，只抓螢火蟲。');{const p=await catchGame(q?3:4,q?1:2,true,2200,600);if(!p)return;showTask(`<h2>練習結束，正式開始</h2><p class="lede">一樣，看到螢火蟲才按。</p>${btn('開始','primary','s')}`,'練習結束，正式開始。');await new Promise(r=>$('#s').addEventListener('click',guard(r)));
-   const r=await catchGame(q?8:12,q?3:5,false,2200,600);if(!r)return;const s=Math.round(3*Math.max(0,r.hits/r.nt-r.fa/r.nn));addPoints(s,`抓到 ${r.hits} 隻！`);addScore('注意力',s,3,`命中 ${r.hits}/${r.nt}，誤按 ${r.fa}`)}
-  await station(4,'燈籠鐘','樹上掛著燈籠鐘，找出正確的時間。');{let got=0,note=[];for(const [h,m] of pick(CLOCK_EASY,q?1:2)){const wr=[(h+4)%12||12,m];const opts=shuffle([[h,m,true],[wr[0],wr[1],false]]);const label=m===0?`${h} 點整`:`${h} 點半`;const r=await clockQ(h,m,opts,label,T);if(r==='hit')got++;addPoints(r==='hit'?(q?2:1):0);tmark(r,note)}addScore('時鐘辨認',q?got*2:got,2,note.join(' '))}
-  await station(5,'點亮燈籠','照順序點亮小路上的五盞燈籠。');{const a=await trail(['1','2','3','4','5'],'請照順序點亮 1、2、3、4、5',q?45000:75000,5);let s=!a.finished?0:a.err<=1?2:a.err<=3?1:0;let note=`錯誤 ${a.err}`;if(a.timeout){state.timeouts++;note+=' 逾時'}addPoints(s);addScore('執行功能（連線）',s,2,note)}
-  if(!q){await station(6,'動物與回家','花園裡的動物探出頭來，然後就要回家了。');let got=0,note=[];for(const it of pick(NAMEPOOL,3)){const foil=pick(NAMEPOOL.filter(x=>x!==it),1)[0];const r=await twoChoice(`<div class="stim">${it[0]}</div>這是什麼動物？`,{html:esc(it[1])},{html:esc(foil[1])},'這是什麼動物？',T);if(r==='hit')got++;addPoints(r==='hit'?1:0);tmark(r,note)}addScore('命名',got,3,note.join(' '))}
-  else await station(6,'寶物回家','回到花園入口了，想想一開始的三樣寶物。');
-  {const f2=pick(WORDPOOL.filter(x=>!w.includes(x)&&!foils.includes(x)),3);let hit=0,dk=0,note=[];
-   showTask(`<h2>還記得一開始的三樣寶物嗎？</h2><p class="lede">接下來每題兩個選一個。想不起來可以按「不確定」。</p>${btn('好，開始','primary','s')}`,'還記得一開始的三樣寶物嗎？接下來每題兩個選一個。');await new Promise(r=>$('#s').addEventListener('click',guard(r)));
-   for(let i=0;i<3;i++){const r=await twoChoice('一開始的寶物，是哪一個？',{html:wordCard(w[i])},{html:wordCard(f2[i])},'一開始的寶物，是哪一個？'+w[i][0]+'，還是'+f2[i][0]+'？',T);if(r==='hit')hit++;else if(r==='dk')dk++;addPoints(r==='hit'?2:0);tmark(r,note)}
-   addScore('延遲回憶',hit*2,6,`記得 ${hit}/3`+(dk?`，不確定 ${dk}`:'')+(note.length?' 逾時':''))}
-  result();}
+  if(!await stRegister(1,w))return;
+  await stOrient(2,['weekday','month','tod'],'',30000);
+  if(!await stCatch(3,[5,2],[20,8],1100,400,4))return;
+  if(!await stMosquito(4,6))return;
+  await stOdd(5,[9,12]);
+  await stClock(6,CLOCK_STD,2,false,30000,1);
+  await station(7,'點亮燈籠','照順序點亮小路上的燈籠。');{const a=await trail(['1','2','3','4','5'],'請依序點亮 1、2、3、4、5',40000,4);const b=await trail(['1','A','2','B','3','C'],'請輪流點亮：1、A、2、B、3、C',60000,4);let s=0,note=[];if(a.finished&&a.err<=1)s+=1;if(b.finished)s+=b.err===0?3:b.err===1?2:b.err===2?1:0;if(a.timeout||b.timeout){state.timeouts++;note.push('逾時')}note.push(`錯誤 ${a.err}+${b.err}`);addPoints(s);addScore('執行功能（連線）',s,4,note.join(' '))}
+  await station(8,'動物探頭','花園的動物探出頭來，牠們叫什麼？');{let got=0,note=[];for(const it of pick(NAMEPOOL,3)){const opts=shuffle([it].concat(pick(NAMEPOOL.filter(x=>x!==it),3)));const r=await peekNaming(it,opts,25000,'cols2');if(r==='hit')got++;addPoints(r==='hit'?1:0);tmark(r,note)}addScore('命名',got,3,note.join(' '))}
+  await station(9,'找出不同類','四樣東西裡，有一樣和其他不是同一類。');{let got=0,note=[];for(const [same,odd] of pick(ODDPOOL,2)){const opts=shuffle(same.concat([odd]));const r=await multiChoice('哪一個和其他三個<b>不是同一類</b>？',opts.map(esc),opts.indexOf(odd),'哪一個和其他三個不是同一類？'+opts.join('、'),30000,'cols2');if(r==='hit')got++;addPoints(r==='hit'?1:0);tmark(r,note)}addScore('抽象分類',got,2,note.join(' '))}
+  await station(10,'星星密碼','星星會依序亮起來，請倒著點回來。');{const a=await starSpanGame(3);if(!a)return;addPoints(a.ok?2:0);const b=await starSpanGame(4);if(!b)return;addPoints(b.ok?1:0);let note=[];if(a.timeout||b.timeout){state.timeouts++;note.push('逾時')}addScore('工作記憶（倒序）',(a.ok?2:0)+(b.ok?1:0),3,note.join(' '))}
+  await stRecall(11,w,6,45000);result()}
+// ================= 樂齡版（9 站） =================
+async function flowSenior(){const w=state.words,T=60000;
+  if(!await stRegister(1,w))return;
+  await stOrient(2,['tod','season','weekday'],'cols2',T);
+  if(!await stCatch(3,[4,2],[12,5],2200,600,3))return;
+  if(!await stMosquito(4,5))return;
+  await stOdd(5,[6,9]);
+  await stClock(6,CLOCK_EASY,2,true,T,1);
+  await stTrailEasy(7,75000);
+  await station(8,'動物探頭','花園的動物探出頭來，牠叫什麼？');{let got=0,note=[];for(const it of pick(NAMEPOOL,3)){const foil=pick(NAMEPOOL.filter(x=>x!==it),1)[0];const r=await peekNaming(it,shuffle([it,foil]),T,'cols2');if(r==='hit')got++;addPoints(r==='hit'?1:0);tmark(r,note)}addScore('命名',got,3,note.join(' '))}
+  await stRecall(9,w,3,T);result()}
+// ================= 極速版（6 站） =================
+async function flowQuick(){const w=state.words,T=30000;
+  if(!await stRegister(1,w))return;
+  await stOrient(2,['tod','weekday'],'cols2',T);
+  if(!await stCatch(3,[3,1],[8,3],2200,600,3))return;
+  if(!await stMosquito(4,4))return;
+  await stTrailEasy(5,45000);
+  await stRecall(6,w,3,T);result()}
 
 // ================= 首頁 / 開始 / 結果 / 記錄 =================
 function home(){setV(null);state=null;Audio.stop();
-  showIntro(`<header style="display:flex;flex-direction:column;gap:8px"><h1>螢火蟲夜遊<span>.</span></h1><p class="lede">跟著螢火蟲走一趟夜間花園：記住寶物、看星空、抓螢火蟲、點亮燈籠，最後把寶物帶回家。全程只要用手指點按。</p><p class="note">篩檢用途，不應作為診斷依據，詳情請洽專業人員</p></header>
+  showIntro(`<header style="display:flex;flex-direction:column;gap:8px"><h1>螢火蟲夜遊<span>.</span></h1><p class="lede">跟著螢火蟲走一趟夜間花園：收集寶物、抓螢火蟲、拍蚊子、找出不一樣的、點亮燈籠，最後把寶物帶回家。每一站都在測一種腦健康能力，全程只要用手指點按。</p><p class="note">篩檢用途，不應作為診斷依據，詳情請洽專業人員</p></header>
   <div class="panel"><h3>選一個版本</h3><div class="grid" style="grid-template-columns:1fr" id="vs">${Object.values(VERSIONS).map(v=>`<button type="button" class="btn vcard" data-v="${v.key}"><b>${v.name}<span class="tag">${v.mins}</span></b><span>適合：${v.who}</span><span>${v.desc}</span></button>`).join('')}</div></div>
   <div class="row">${btn('查看所有受試者記錄','quiet','recs')}${btn('測試試算表連線','quiet','diag')}</div><p class="note" id="diagout"></p>
   <div class="warnbox"><b>這是篩檢遊戲：</b>分數與「需要進一步評估的可能性」是依門檻推估的參考值，尚未以臨床樣本校正，不是診斷。建議由家人或工作人員陪同進行。</div>`,'螢火蟲夜遊。請選擇版本。');
@@ -304,26 +382,27 @@ function start(key){setV(key);state=null;
   <div class="row">${btn('換版本','quiet','back')}${btn('查看記錄','quiet','recs')}</div>`,V.name+'。請填寫受試者姓名，再選擇教育程度出發。');
   $('#form').addEventListener('submit',e=>e.preventDefault());$('#back').addEventListener('click',guard(()=>{location.hash='';home()}));$('#recs').addEventListener('click',guard(()=>{location.hash='records';records()}));
   $('#edu').querySelectorAll('.btn').forEach((b,i)=>b.addEventListener('click',guard(()=>{const name=$('#pname').value.trim();if(!name){toast('請先填寫受試者姓名或代號');$('#pname').focus();return}const age=parseInt($('#page').value,10);
-    state={v:V.key,name,age:isNaN(age)?null:age,edu:i===0?'low':'high',start:Date.now(),timeouts:0,words:pick(WORDPOOL,3)};sections.length=0;score=0;$('#hudScore').textContent='0';Audio.start();(V.key==='std'?flowStd:flowEasy)()})))}
+    state={v:V.key,name,age:isNaN(age)?null:age,edu:i===0?'low':'high',start:Date.now(),timeouts:0,words:pick(WORDPOOL,3)};sections.length=0;score=0;$('#hudScore').textContent='0';Audio.start();({std:flowStd,senior:flowSenior,quick:flowQuick})[V.key]()})))}
 function result(){Audio.big();sparkle(14);
   const raw=sections.reduce((a,s)=>a+s.got,0),adj=raw+(state.edu==='low'&&raw<V.total?1:0),mins=Math.round((Date.now()-state.start)/6000)/10,recall=sections.find(s=>s.name==='延遲回憶').got;
+  const rtSec=sections.find(s=>s.name==='反應速度');const rt=rtSec?rtSec.rt:null;
   let band,cls,advice;
   if(adj>=V.cut[0]&&recall>=4){band='目前未見明顯異常';cls='good';advice='建議每年再玩一次。若家人察覺記憶或生活功能明顯退步，仍請就醫。'}
   else if(adj>=V.cut[1]){band='建議追蹤觀察';cls='warn';advice='分數接近警戒值。建議 3 至 6 個月後再玩一次，並留意日常是否有重複發問、迷路、忘記約定等情形。'}
   else{band='建議至記憶門診或神經內科進一步評估';cls='bad';advice='此結果不代表確診，但值得請專業人員做完整評估（例如 MoCA、MMSE 與相關檢查）。'}
   if(state.timeouts>=(V.key==='std'?3:2))advice+='　本次有多題逾時，可能受聽力、視力或專注狀況影響，解讀時請一併考量。';
   const prob=probImpair(V,adj,recall),d=new Date(),stamp=`${d.getFullYear()}/${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
-  const rec={v:V.key,vname:V.name,name:state.name,age:state.age,edu:state.edu,score:adj,raw,total:V.total,band,cls,prob:Math.round(prob*1000)/1000,mins,timeouts:state.timeouts,sections:sections.map(s=>({name:s.name,got:s.got,max:s.max,note:s.note})),ts:Date.now(),stamp};
+  const rec={v:V.key,vname:V.name,name:state.name,age:state.age,edu:state.edu,score:adj,raw,total:V.total,band,cls,prob:Math.round(prob*1000)/1000,rt,mins,timeouts:state.timeouts,sections:sections.map(s=>({name:s.name,got:s.got,max:s.max,note:s.note})),ts:Date.now(),stamp};
   saveRecord(rec).then(r=>{const el=$('#saved');if(el)el.textContent=r.where==='shared'?'已存入共用試算表':r.where==='failed'?'試算表寫入失敗（'+(r.why||'')+'），已暫存在這台裝置，請用「複製結果」另外保留':'已存在這台裝置'});
   state=null;
   showIntro(`<header><h1>${esc(rec.name)} 回家了<span>.</span><span class="tag">${V.name}</span></h1></header>
   <div class="panel"><div class="score">${adj} <span style="font-size:26px;color:var(--muted)">/ ${V.total}</span></div><div class="band ${cls}">${band}</div>${gaugeHtml(prob)}<p class="lede">${esc(advice)}</p></div>
   <div class="panel"><table><tr><th>站</th><th></th><th>得分</th></tr>${sections.map(s=>`<tr><td>${esc(s.name)}</td><td class="note">${esc(s.note)}</td><td>${s.got} / ${s.max}</td></tr>`).join('')}</table>
-  <p class="note">用時 ${mins} 分鐘，逾時 ${state?0:rec.timeouts} 次${adj!==raw?'，教育程度校正 +1 分':''}。判讀門檻偏向高敏感度（${V.cut[0]} 分以下即提示追蹤），延遲回憶低於 4 分會單獨降級。「需要進一步評估的可能性」是依本版門檻推估的參考值，尚未以臨床樣本校正。</p><p class="note" id="saved">儲存中…</p></div>
+  <p class="note">用時 ${mins} 分鐘，逾時 ${rec.timeouts} 次${adj!==raw?'，教育程度校正 +1 分':''}${rt?'，拍蚊子中位反應 '+rt+' 毫秒':''}。判讀門檻偏向高敏感度（${V.cut[0]} 分以下即提示追蹤），延遲回憶低於 4 分會單獨降級。「需要進一步評估的可能性」是依本版門檻推估的參考值，尚未以臨床樣本校正。</p><p class="note" id="saved">儲存中…</p></div>
   <div class="row">${btn('複製結果','','cp')}${btn('測下一位','primary','again')}</div><div class="row">${btn('回首頁','quiet','home')}${btn('查看記錄','quiet','recs')}</div>
   <p class="note">本工具為篩檢遊戲，不是醫療診斷，也不能取代臨床評估。</p>`,'遊戲結束。總分 '+adj+' 分。'+band);
   $('#cp').addEventListener('click',guard(()=>copyText(recText(rec))));$('#again').addEventListener('click',guard(()=>start(V.key)));$('#home').addEventListener('click',guard(()=>{location.hash='';home()}));$('#recs').addEventListener('click',guard(()=>{location.hash='records';records()}))}
-function recText(r){return `螢火蟲夜遊 ${r.vname||''} ${r.stamp}\n受試者 ${r.name}${r.age?'（'+r.age+' 歲）':''}\n總分 ${r.score}/${r.total}\n判讀：${r.band}\n需要進一步腦健康評估的可能性（估計）約 ${Math.round((r.prob||0)*100)}%\n`+(r.sections||[]).map(s=>`${s.name} ${s.got}/${s.max}${s.note?'（'+s.note+'）':''}`).join('\n')+`\n用時 ${r.mins} 分鐘，逾時 ${r.timeouts} 次`}
+function recText(r){return `螢火蟲夜遊 ${r.vname||''} ${r.stamp}\n受試者 ${r.name}${r.age?'（'+r.age+' 歲）':''}\n總分 ${r.score}/${r.total}\n判讀：${r.band}\n需要進一步評估的可能性（估計）約 ${Math.round((r.prob||0)*100)}%\n`+(r.rt?`拍蚊子中位反應 ${r.rt} 毫秒\n`:'')+(r.sections||[]).map(s=>`${s.name} ${s.got}/${s.max}${s.note?'（'+s.note+'）':''}`).join('\n')+`\n用時 ${r.mins} 分鐘，逾時 ${r.timeouts} 次`}
 function copyText(text){navigator.clipboard.writeText(text).then(()=>toast('已複製')).catch(()=>{const ta=document.createElement('textarea');ta.value=text;intro.appendChild(ta);ta.select();toast('請長按複製')})}
 let filterV='all';
 async function records(){setV(null);state=null;Audio.stop();
@@ -335,7 +414,7 @@ async function records(){setV(null);state=null;Audio.stop();
   $('#rlist').addEventListener('click',guard(e=>{const el=e.target.closest('.rec');if(el)detail(list[+el.dataset.i])}))}
 function detail(r){showIntro(`<header><h1>${esc(r.name||'（未填）')}<span>.</span><span class="tag">${esc(r.vname||'')}</span></h1><p class="note">${esc(r.stamp||'')}${r.age?'　'+r.age+' 歲':''}　${r.edu==='low'?'小學以下':'國中以上'}</p></header>
   <div class="panel"><div class="score">${r.score} <span style="font-size:26px;color:var(--muted)">/ ${r.total}</span></div><div class="band ${esc(r.cls||'')}">${esc(r.band||'')}</div>${r.prob!=null?gaugeHtml(r.prob):''}</div>
-  <div class="panel"><table><tr><th>站</th><th></th><th>得分</th></tr>${(r.sections||[]).map(s=>`<tr><td>${esc(s.name)}</td><td class="note">${esc(s.note||'')}</td><td>${s.got} / ${s.max}</td></tr>`).join('')}</table><p class="note">用時 ${r.mins} 分鐘，逾時 ${r.timeouts} 次。要刪除這筆，請直接到 Google 試算表刪除該列。</p></div>
+  <div class="panel"><table><tr><th>站</th><th></th><th>得分</th></tr>${(r.sections||[]).map(s=>`<tr><td>${esc(s.name)}</td><td class="note">${esc(s.note||'')}</td><td>${s.got} / ${s.max}</td></tr>`).join('')}</table><p class="note">用時 ${r.mins} 分鐘，逾時 ${r.timeouts} 次${r.rt?'，拍蚊子中位反應 '+r.rt+' 毫秒':''}。要刪除這筆，請直接到 Google 試算表刪除該列。</p></div>
   <div class="row">${btn('複製','','cp')}${btn('回列表','primary','back')}</div>`);
   $('#back').addEventListener('click',guard(records));$('#cp').addEventListener('click',guard(()=>copyText(recText(r))))}
 function route(){const h=location.hash.replace('#','');if(h==='records')records();else if(VERSIONS[h])start(h);else home()}
